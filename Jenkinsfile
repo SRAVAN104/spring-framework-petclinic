@@ -80,7 +80,7 @@ pipeline {
                         CMD ["./mvnw", "jetty:run-war"]
                         
                     '''
-                    sh "docker build -t ${DOCKERHUB_REPO}:${env.BUILD_NUMBER}-${COMMIT_ID} ."
+                   // sh "docker build -t ${DOCKERHUB_REPO}:${env.BUILD_NUMBER}-${COMMIT_ID} ."
                 }
             }
         }
@@ -93,6 +93,7 @@ pipeline {
                         docker run --rm -i hadolint/hadolint < Dockerfile > hadolint_report.txt
                     '''
                     archiveArtifacts artifacts: 'hadolint_report.txt', allowEmptyArchive: true
+                    sh "docker build -t ${DOCKERHUB_REPO}:${env.BUILD_NUMBER}-${COMMIT_ID} ."
                 }
             }
         }
@@ -103,7 +104,7 @@ pipeline {
             steps {
                 script {
                     echo "Scanning Docker Image with Trivy"
-                    sh 'trivy image --download-db-only'
+                    //sh 'trivy image --download-db-only'
                     //def imageTag = "${DOCKERHUB_REPO}:${env.BUILD_NUMBER}-${COMMIT_ID}"
                     sh "trivy image --exit-code 1 --severity HIGH,CRITICAL --format json -o trivy_report.json ${DOCKERHUB_REPO}:${env.BUILD_NUMBER}-${COMMIT_ID}"
 
