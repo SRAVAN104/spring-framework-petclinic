@@ -104,7 +104,7 @@ pipeline {
             steps {
                 script {
                     echo "Scanning Docker Image with Trivy"
-                    //sh 'trivy image --download-db-only'
+                    sh 'trivy image --download-db-only'
                     //def imageTag = "${DOCKERHUB_REPO}:${env.BUILD_NUMBER}-${COMMIT_ID}"
                     sh "trivy image --exit-code 1 --severity HIGH,CRITICAL --format json -o trivy_report.json ${DOCKERHUB_REPO}:${env.BUILD_NUMBER}-${COMMIT_ID}"
 
