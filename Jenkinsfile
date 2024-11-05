@@ -4,7 +4,7 @@ pipeline {
         maven 'maven' 
     }
     environment {
-        SONARQUBE_SERVER = 'sonar' 
+        SONARQUBE_SERVER = 'SONARQUBE_SERVER' 
         DOCKERHUB_REPO = 'sravan614/petclinic'
         COMMIT_ID = sh(script: "git rev-parse --short HEAD", returnStdout: true).trim()
         BUILD_NUMBER = "${env.BUILD_NUMBER}"
