@@ -101,26 +101,16 @@ pipeline {
             }
         }
         stage('Trivy Image Scan') {
-    steps {
-        script {
-            echo "Pre-downloading Trivy vulnerability database"
-            retry(3) { // Retry up to 3 times
-                sh 'trivy image --download-db-only'
+            steps {
+                script {
+                    echo "Scanning Docker Image with Trivy"
+                   // sh 'trivy image --download-db-only'
+                    def imageTag = "${DOCKERHUB_REPO}:${env.BUILD_NUMBER}-${COMMIT_ID}"
+                    sh "trivy image --exit-code 1 --severity HIGH,CRITICAL --format json --scanners vuln -o trivy_report.json $imageTag"
+                    archiveArtifacts artifacts: 'trivy_report.json', allowEmptyArchive: true
+                }
             }
-
-            echo "Scanning Docker Image with Trivy"
-            def imageTag = "${DOCKERHUB_REPO}:${env.BUILD_NUMBER}-${COMMIT_ID}"
-            sh "trivy image --skip-update --exit-code 1 --severity HIGH,CRITICAL --format json --scanners vuln -o trivy_report.json $imageTag"
-            archiveArtifacts artifacts: 'trivy_report.json', allowEmptyArchive: true
         }
-    }
-}
-
-environment {
-    TRIVY_CACHE_DIR = '/path/to/cache' // Customize this path
-}
-
-
         stage('OWASP ZAP Scan') {
             steps {
                 catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') {
