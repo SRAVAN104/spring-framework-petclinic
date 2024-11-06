@@ -5,7 +5,7 @@ pipeline {
     }
     environment {
         SONARQUBE_SERVER = 'SONARQUBE_SERVER' // Replace with actual SonarQube server name
-        DOCKERHUB_REPO = 'sravan614/sampleapp' // Replace with your DockerHub repository
+        DOCKERHUB_REPO = 'sravan614/petclinic' // Replace with your DockerHub repository
         COMMIT_ID = sh(script: "git rev-parse --short HEAD", returnStdout: true).trim()
         ECR_URI = '241533123721.dkr.ecr.us-east-1.amazonaws.com/petclinic' // Replace with your AWS ECR URI
         AWS_REGION = 'us-east-1' // Replace with your AWS region
