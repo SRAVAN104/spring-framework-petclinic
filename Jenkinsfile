@@ -104,11 +104,13 @@ pipeline {
     steps {
         script {
             echo "Pre-downloading Trivy vulnerability database"
-            sh 'trivy image --download-db-only' // Download the Trivy DB to avoid rate limiting during scan
+            retry(3) { // Retry up to 3 times
+                sh 'trivy image --download-db-only'
+            }
 
             echo "Scanning Docker Image with Trivy"
             def imageTag = "${DOCKERHUB_REPO}:${env.BUILD_NUMBER}-${COMMIT_ID}"
-            sh "trivy image --exit-code 1 --severity HIGH,CRITICAL --format json --scanners vuln -o trivy_report.json $imageTag"
+            sh "trivy image --skip-update --exit-code 1 --severity HIGH,CRITICAL --format json --scanners vuln -o trivy_report.json $imageTag"
             archiveArtifacts artifacts: 'trivy_report.json', allowEmptyArchive: true
         }
     }
