@@ -1,14 +1,14 @@
 pipeline {
     agent any
     tools {
-        maven 'maven' // Define the tool for Maven
+        maven 'maven' 
     }
     environment {
-        SONARQUBE_SERVER = 'SONARQUBE_SERVER' // Replace with actual SonarQube server name
-        DOCKERHUB_REPO = 'sravan614/petclinic' // Replace with your DockerHub repository
+        SONARQUBE_SERVER = 'SONARQUBE_SERVER' 
+        DOCKERHUB_REPO = 'sravan614/petclinic'
         COMMIT_ID = sh(script: "git rev-parse --short HEAD", returnStdout: true).trim()
-        ECR_URI = '241533123721.dkr.ecr.us-east-1.amazonaws.com/petclinic' // Replace with your AWS ECR URI
-        AWS_REGION = 'us-east-1' // Replace with your AWS region
+        ECR_URI = '241533123721.dkr.ecr.us-east-1.amazonaws.com/petclinic'  // Replace with your actual ECR URI
+        AWS_REGION = 'us-east-1'  // Replace with your AWS region
         SLACK_CHANNEL = '#cloud'
         EMAIL_RECIPIENTS = 'thanatisravankumar2003@gmail.com'
     }
@@ -29,7 +29,7 @@ pipeline {
                 }
             }
         }
-        stage('SonarQube SAST') {
+        stage('SAST with SonarQube') {
             steps {
                 script {
                     echo "Running SonarQube SAST Scan"
@@ -43,7 +43,6 @@ pipeline {
             steps {
                 script {
                     timeout(time: 60, unit: 'MINUTES') {
-                        echo "Running OWASP Dependency Check"
                         dependencyCheck additionalArguments: '--scan ./ --disableNodeJS', odcInstallation: 'owasp'
                         dependencyCheckPublisher(
                             failedTotalCritical: 1,
@@ -72,7 +71,7 @@ pipeline {
                     def imageTag = "${DOCKERHUB_REPO}:${env.BUILD_NUMBER}-${COMMIT_ID}"
                     sh '''
                         cat <<EOF > Dockerfile
-                        FROM openjdk:17
+                        FROM tomcat:9.0-jdk17
                         RUN groupadd -r appgroup && useradd -r -g appgroup -m -d /app appuser
                         RUN chown -R appuser:appgroup /usr/local/tomcat
                         WORKDIR /app
@@ -83,14 +82,13 @@ pipeline {
                         COPY src ./src
                         EXPOSE 8080
                         CMD ["./mvnw", "jetty:run-war"]
-                        EOF
+                        
                     '''
-                    // Build the Docker image
-                    sh "docker build -t ${imageTag} ."
+                    // sh "docker build -t ${imageTag} ."
                 }
             }
         }
-        stage('Lint Dockerfile with Hadolint') {
+        stage('Lint Dockerfile') {
             steps {
                 script {
                     echo "Linting Dockerfile with Hadolint"
@@ -98,6 +96,7 @@ pipeline {
                         docker run --rm -i hadolint/hadolint < Dockerfile > hadolint_report.txt
                     '''
                     archiveArtifacts artifacts: 'hadolint_report.txt', allowEmptyArchive: true
+                    sh "docker build -t ${DOCKERHUB_REPO}:${env.BUILD_NUMBER}-${COMMIT_ID} ."
                 }
             }
         }
@@ -105,6 +104,7 @@ pipeline {
             steps {
                 script {
                     echo "Scanning Docker Image with Trivy"
+                   // sh 'trivy image --download-db-only'
                     def imageTag = "${DOCKERHUB_REPO}:${env.BUILD_NUMBER}-${COMMIT_ID}"
                     sh "trivy image --exit-code 1 --severity HIGH,CRITICAL --format json --scanners vuln -o trivy_report.json $imageTag"
                     archiveArtifacts artifacts: 'trivy_report.json', allowEmptyArchive: true
@@ -121,6 +121,7 @@ pipeline {
                         if (params.ZAP_SCAN_TYPE == 'Baseline') {
                            zapScript = 'zap-baseline.py'
                            filetype = 'zap-baseline.html'
+                        
                         } else if (params.ZAP_SCAN_TYPE == 'API') {
                            zapScript = 'zap-api-scan.py'
                            filetype = 'zap-api-scan.html'
@@ -130,11 +131,11 @@ pipeline {
                         }
                         
                         def status = sh(script: """
-                            docker run -v $PWD:/zap/wrk/:rw -t owasp/zap2docker-stable python3 /zap/${zapScript} -t http://3.90.45.102:8081 > ${filetype}
+                            docker run -v $PWD:/zap/wrk/:rw -t ghcr.io/zaproxy/zaproxy:stable python3 /zap/${zapScript} -t http://54.152.246.198:4000/ > ${filetype}
                         """, returnStatus: true)
 
                         env.FILE_TYPE = filetype
-                        echo "${env.FILE_TYPE}"
+                        echo "${FILE_TYPE}"
 
                         if (status == 0) {
                             echo "ZAP scan completed successfully."
@@ -159,38 +160,43 @@ pipeline {
                 }
             }
         }
+        
     }
     post {
         always {
+            
             script {
                 withCredentials([string(credentialsId: 'SlackToken', variable: 'SLACK_TOKEN')]) {
-                    def message = "Jenkins Job - ${currentBuild.currentResult}: Build #${env.BUILD_NUMBER} in job '${env.JOB_NAME}' completed."
+                    def message = "Jenkins Job - SUCCESS: Build #${env.BUILD_NUMBER} in job '${env.JOB_NAME}' completed successfully."
                     slackSend(
                         channel: "${SLACK_CHANNEL}",
-                        color: currentBuild.currentResult == 'SUCCESS' ? 'good' : 'danger',
+                        color: 'good',
                         message: message,
                         tokenCredentialId: 'SlackToken'
                     )
                 }
             }
+            
+                    emailext (
+                        subject: "Jenkins Build # ${currentBuild.currentResult ?: 'SUCCESS'}",
+                            body: """
+                            
+                            Commit ID: ${COMMIT_ID}
+                            Build Link: ${env.BUILD_URL}
+                            Triggered By: ${env.BUILD_USER}
 
-            emailext (
-                subject: "Jenkins Build #${currentBuild.currentResult}",
-                body: """
-                    Commit ID: ${COMMIT_ID}
-                    Build Link: ${env.BUILD_URL}
-                    Triggered By: ${env.BUILD_USER}
-
-                    Reports:
-                    - Trivy Report: ${env.WORKSPACE}/trivy_report.json
-                    - Hadolint Report: ${env.WORKSPACE}/hadolint_report.txt
-                    - OWASP ZAP Report: ${env.WORKSPACE}/${env.FILE_TYPE}
-                """,
-                to: "${EMAIL_RECIPIENTS}",
-                attachmentsPattern: "trivy_report.json, hadolint_report.txt, ${env.FILE_TYPE}"  // Attach the reports
-            )
+                            Reports:
+                            - Trivy Report: ${env.WORKSPACE}/trivy_report.json
+                            - Hadolint Report: ${env.WORKSPACE}/hadolint_report.txt
+                            - OWASP ZAP Report: ${env.WORKSPACE}/${env.FILE_TYPE}
+                        """,
+                        to: "${EMAIL_RECIPIENTS}",
+                        attachmentsPattern: "trivy_report.json, hadolint_report.txt, ${env.FILE_TYPE}"  // Attach the reports
+                    )
             echo "Cleaning up Docker resources"
             deleteDir()
         }
-    }
+        
+        
+    }  
 }
