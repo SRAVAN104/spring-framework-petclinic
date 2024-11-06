@@ -116,6 +116,11 @@ pipeline {
     }
 }
 
+environment {
+    TRIVY_CACHE_DIR = '/path/to/cache' // Customize this path
+}
+
+
         stage('OWASP ZAP Scan') {
             steps {
                 catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') {
