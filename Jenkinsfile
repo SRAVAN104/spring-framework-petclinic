@@ -7,12 +7,20 @@ pipeline {
         SONARQUBE_SERVER = 'SONARQUBE_SERVER' 
         DOCKERHUB_REPO = 'sravan614/petclinic'
         COMMIT_ID = sh(script: "git rev-parse --short HEAD", returnStdout: true).trim()
-        BUILD_NUMBER = "${env.BUILD_NUMBER}"
+        ECR_URI = '241533123721.dkr.ecr.us-east-1.amazonaws.com/petclinic'  // Replace with your actual ECR URI
+        AWS_REGION = 'us-east-1'  // Replace with your AWS region
+        SLACK_CHANNEL = '#cloud'
+        EMAIL_RECIPIENTS = 'thanatisravankumar2003@gmail.com'
     }
     parameters {
         choice(name: 'ZAP_SCAN_TYPE', choices: ['Baseline', 'API', 'FULL'], description: 'Choose the type of OWASP ZAP scan to run')
     }
     stages {
+        stage('Checkout Code') {
+            steps {
+                checkout scm
+            }
+        }
         stage('Unit Test') {
             steps {
                 script {
@@ -21,7 +29,6 @@ pipeline {
                 }
             }
         }
-
         stage('SAST with SonarQube') {
             steps {
                 script {
@@ -32,7 +39,6 @@ pipeline {
                 }
             }
         }
-
         stage('OWASP Dependency Check') {
             steps {
                 script {
@@ -50,7 +56,6 @@ pipeline {
                 }
             }
         }
-
         stage('Build WAR Package') {
             steps {
                 script {
@@ -59,12 +64,11 @@ pipeline {
                 }
             }
         }
-
         stage('Build Docker Image') {
             steps {
                 script {
                     echo 'Building Docker image'
-                    //def imageTag = "${DOCKERHUB_REPO}:${env.BUILD_NUMBER}-${COMMIT_ID}"
+                    def imageTag = "${DOCKERHUB_REPO}:${env.BUILD_NUMBER}-${COMMIT_ID}"
                     sh '''
                         cat <<EOF > Dockerfile
                         FROM tomcat:9.0-jdk17
@@ -72,7 +76,7 @@ pipeline {
                         RUN chown -R appuser:appgroup /usr/local/tomcat
                         WORKDIR /app
                         COPY .mvn/ .mvn
-                        COPY mvnw pom.xml ./
+                        COPY mvnw pom.xml ./ 
                         RUN chmod +x mvnw
                         USER appuser
                         COPY src ./src
@@ -80,11 +84,10 @@ pipeline {
                         CMD ["./mvnw", "jetty:run-war"]
                         
                     '''
-                   // sh "docker build -t ${DOCKERHUB_REPO}:${env.BUILD_NUMBER}-${COMMIT_ID} ."
+                    // sh "docker build -t ${imageTag} ."
                 }
             }
         }
-
         stage('Lint Dockerfile') {
             steps {
                 script {
@@ -97,35 +100,42 @@ pipeline {
                 }
             }
         }
-
-        
-
         stage('Trivy Image Scan') {
             steps {
                 script {
                     echo "Scanning Docker Image with Trivy"
                     sh 'trivy image --download-db-only'
-                    //def imageTag = "${DOCKERHUB_REPO}:${env.BUILD_NUMBER}-${COMMIT_ID}"
-                    sh "trivy image --exit-code 1 --severity HIGH,CRITICAL --format json -o trivy_report.json ${DOCKERHUB_REPO}:${env.BUILD_NUMBER}-${COMMIT_ID}"
-
+                    def imageTag = "${DOCKERHUB_REPO}:${env.BUILD_NUMBER}-${COMMIT_ID}"
+                    sh "trivy image --exit-code 1 --severity HIGH,CRITICAL --format json -o trivy_report.json $imageTag"
                     archiveArtifacts artifacts: 'trivy_report.json', allowEmptyArchive: true
                 }
             }
         }
-
         stage('OWASP ZAP Scan') {
             steps {
                 catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') {
                     script {
-                      /*  sh '''
-                            sudo apt-get install -y python3
-                            python3 --version
-                        '''*/
                         echo "Selected OWASP ZAP scan type: ${params.ZAP_SCAN_TYPE}"
-                        def zapScript = params.ZAP_SCAN_TYPE == 'Baseline' ? 'zap-baseline.py' : (params.ZAP_SCAN_TYPE == 'API' ? 'zap-api-scan.py' : 'zap-full-scan.py')
-                        def status = sh(script: '''
-                            docker run -v $PWD:/zap/wrk/:rw -t ghcr.io/zaproxy/zaproxy:stable python3 /zap/${zapScript} -t http://54.89.252.41:4000/ > ${zapScript}.html
-                        ''', returnStatus: true)
+                        def zapScript = ''
+                        def filetype = ''
+                        if (params.ZAP_SCAN_TYPE == 'Baseline') {
+                           zapScript = 'zap-baseline.py'
+                           filetype = 'zap-baseline.html'
+                        
+                        } else if (params.ZAP_SCAN_TYPE == 'API') {
+                           zapScript = 'zap-api-scan.py'
+                           filetype = 'zap-api-scan.html'
+                        } else if (params.ZAP_SCAN_TYPE == 'FULL') {
+                           zapScript = 'zap-full-scan.py'
+                           filetype = 'zap-full-scan.html'
+                        }
+                        
+                        def status = sh(script: """
+                            docker run -v $PWD:/zap/wrk/:rw -t ghcr.io/zaproxy/zaproxy:stable python3 /zap/${zapScript} -t http://54.152.246.198:4000/ > ${filetype}
+                        """, returnStatus: true)
+
+                        env.FILE_TYPE = filetype
+                        echo "${FILE_TYPE}"
 
                         if (status == 0) {
                             echo "ZAP scan completed successfully."
@@ -136,33 +146,57 @@ pipeline {
                 }
             }
         }
-
-        stage('Push Docker Image') {
+        stage('Push to ECR') {
             steps {
                 script {
-                    echo "Pushing Docker Image to DockerHub"
-                  //  def imageTag = "${DOCKERHUB_REPO}:${env.BUILD_NUMBER}-${COMMIT_ID}"
-                    docker.withRegistry('https://index.docker.io/v1/', 'docker-cred') {
-                        sh "docker push ${DOCKERHUB_REPO}:${env.BUILD_NUMBER}-${COMMIT_ID}"
-                    }
+                    echo "Logging into AWS ECR"
+                    sh "aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_URI}"
+                    echo "Tagging Docker image"
+                    def imageTag = "${DOCKERHUB_REPO}:${env.BUILD_NUMBER}-${COMMIT_ID}"
+                    def ecrImageTag = "${ECR_URI}:${env.BUILD_NUMBER}-${COMMIT_ID}"
+                    sh "docker tag ${imageTag} ${ecrImageTag}"
+                    echo "Pushing image to ECR"
+                    sh "docker push ${ecrImageTag}"
                 }
             }
         }
+        
     }
-    // post {
-    //     always {
-    //         echo "Cleaning up Docker resources"
-    //         sh 'docker system prune -f'
-    //     }
-    //     success {
-    //         mail to: 'lathasree.chillakuru@gmail.com',
-    //              subject: "Jenkins Job - SUCCESS",
-    //              body: "The Jenkins job has completed successfully."
-    //     }
-    //     failure {
-    //         mail to: 'lathasree.chillakuru@gmail.com',
-    //              subject: "Jenkins Job - FAILURE",
-    //              body: "The Jenkins job has failed. Please review the logs."
-    //     }
-    // }
+    post {
+        always {
+            
+            script {
+                withCredentials([string(credentialsId: 'SlackToken', variable: 'SLACK_TOKEN')]) {
+                    def message = "Jenkins Job - SUCCESS: Build #${env.BUILD_NUMBER} in job '${env.JOB_NAME}' completed successfully."
+                    slackSend(
+                        channel: "${SLACK_CHANNEL}",
+                        color: 'good',
+                        message: message,
+                        tokenCredentialId: 'SlackToken'
+                    )
+                }
+            }
+            
+                    emailext (
+                        subject: "Jenkins Build # ${currentBuild.currentResult ?: 'SUCCESS'}",
+                            body: """
+                            
+                            Commit ID: ${COMMIT_ID}
+                            Build Link: ${env.BUILD_URL}
+                            Triggered By: ${env.BUILD_USER}
+
+                            Reports:
+                            - Trivy Report: ${env.WORKSPACE}/trivy_report.json
+                            - Hadolint Report: ${env.WORKSPACE}/hadolint_report.txt
+                            - OWASP ZAP Report: ${env.WORKSPACE}/${env.FILE_TYPE}
+                        """,
+                        to: "${EMAIL_RECIPIENTS}",
+                        attachmentsPattern: "trivy_report.json, hadolint_report.txt, ${env.FILE_TYPE}"  // Attach the reports
+                    )
+            echo "Cleaning up Docker resources"
+            deleteDir()
+        }
+        
+        
+    }  
 }
