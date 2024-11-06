@@ -106,7 +106,7 @@ pipeline {
                     echo "Scanning Docker Image with Trivy"
                    // sh 'trivy image --download-db-only'
                     def imageTag = "${DOCKERHUB_REPO}:${env.BUILD_NUMBER}-${COMMIT_ID}"
-                    sh "trivy image --exit-code 1 --severity HIGH,CRITICAL --format json -o trivy_report.json $imageTag"
+                    sh "trivy image --exit-code 1 --severity HIGH,CRITICAL --format json --scanners vuln -o trivy_report.json $imageTag"
                     archiveArtifacts artifacts: 'trivy_report.json', allowEmptyArchive: true
                 }
             }
