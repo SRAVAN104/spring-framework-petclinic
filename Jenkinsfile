@@ -181,37 +181,40 @@ stage('OWASP ZAP Scan') {
         
     }
     post {
-    always {
-        script {
-            withCredentials([string(credentialsId: 'SlackToken', variable: 'SLACK_TOKEN')]) {
-                def message = "Jenkins Job - ${currentBuild.currentResult ?: 'SUCCESS'}: Build #${env.BUILD_NUMBER} in job '${env.JOB_NAME}' completed."
-                slackSend(
-                    channel: "${SLACK_CHANNEL}",
-                    color: (currentBuild.result == 'SUCCESS') ? 'good' : 'warning',
-                    message: message,
-                    tokenCredentialId: 'SlackToken'
-                )
+        always {
+            
+            script {
+                withCredentials([string(credentialsId: 'SlackToken', variable: 'SLACK_TOKEN')]) {
+                    def message = "Jenkins Job - SUCCESS: Build #${env.BUILD_NUMBER} in job '${env.JOB_NAME}' completed successfully."
+                    slackSend(
+                        channel: "${SLACK_CHANNEL}",
+                        color: 'good',
+                        message: message,
+                        tokenCredentialId: 'SlackToken'
+                    )
+                }
             }
+            
+                    emailext (
+                        subject: "Jenkins Build # ${currentBuild.currentResult ?: 'SUCCESS'}",
+                            body: """
+                            
+                            Commit ID: ${COMMIT_ID}
+                            Build Link: ${env.BUILD_URL}
+                            Triggered By: ${env.BUILD_USER}
+
+                            Reports:
+                            - Trivy Report: ${env.WORKSPACE}/trivy_report.json
+                            - Hadolint Report: ${env.WORKSPACE}/hadolint_report.txt
+                            - OWASP ZAP Report: ${env.WORKSPACE}/${env.FILE_TYPE}
+                        """,
+                        to: "${EMAIL_RECIPIENTS}",
+                        attachmentsPattern: "trivy_report.json, hadolint_report.txt, ${env.FILE_TYPE}"  // Attach the reports
+                    )
+            echo "Cleaning up Docker resources"
+            deleteDir()
         }
-
-        emailext (
-            subject: "Jenkins Build #${env.BUILD_NUMBER}: ${currentBuild.result}",
-            body: """
-                Commit ID: ${COMMIT_ID}
-                Build Link: ${env.BUILD_URL}
-                Triggered By: ${env.BUILD_USER}
-
-                Reports:
-                - Trivy Report: ${env.WORKSPACE}/trivy_report.json
-                - Hadolint Report: ${env.WORKSPACE}/hadolint_report.txt
-                - OWASP ZAP Report: ${env.WORKSPACE}/${env.FILE_TYPE}
-            """,
-            to: "${EMAIL_RECIPIENTS}",
-            attachmentsPattern: "trivy_report.json, hadolint_report.txt, ${env.FILE_TYPE}",  // Attach the reports
-            attachLog: true  // Attach the build log as well for better debugging
-        )
-        echo "Cleaning up Docker resources"
-        deleteDir()
-    }
-}
+        
+        
+    }  
 }
