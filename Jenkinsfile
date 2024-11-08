@@ -129,41 +129,41 @@ pipeline {
     }
 }
 
-        stage('OWASP ZAP Scan') {
-            steps {
-                catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') {
-                    script {
-                        echo "Selected OWASP ZAP scan type: ${params.ZAP_SCAN_TYPE}"
-                        def zapScript = ''
-                        def filetype = ''
-                        if (params.ZAP_SCAN_TYPE == 'Baseline') {
-                           zapScript = 'zap-baseline.py'
-                           filetype = 'zap-baseline.html'
-                        
-                        } else if (params.ZAP_SCAN_TYPE == 'API') {
-                           zapScript = 'zap-api-scan.py'
-                           filetype = 'zap-api-scan.html'
-                        } else if (params.ZAP_SCAN_TYPE == 'FULL') {
-                           zapScript = 'zap-full-scan.py'
-                           filetype = 'zap-full-scan.html'
-                        }
-                        
-                        def status = sh(script: """
-                            docker run -v $PWD:/zap/wrk/:rw -t ghcr.io/zaproxy/zaproxy:stable python3 /zap/${zapScript} -t http://54.152.246.198:4000/ > ${filetype}
-                        """, returnStatus: true)
+stage('OWASP ZAP Scan') {
+    steps {
+        catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') {
+            script {
+                echo "Selected OWASP ZAP scan type: ${params.ZAP_SCAN_TYPE}"
+                def zapScript = ''
+                def filetype = ''
+                if (params.ZAP_SCAN_TYPE == 'Baseline') {
+                    zapScript = 'zap-baseline.py'
+                    filetype = 'zap-baseline.html'
+                } else if (params.ZAP_SCAN_TYPE == 'API') {
+                    zapScript = 'zap-api-scan.py'
+                    filetype = 'zap-api-scan.html'
+                } else if (params.ZAP_SCAN_TYPE == 'FULL') {
+                    zapScript = 'zap-full-scan.py'
+                    filetype = 'zap-full-scan.html'
+                }
 
-                        env.FILE_TYPE = filetype
-                        echo "${FILE_TYPE}"
+                // Run the ZAP scan and handle non-zero exit codes
+                def status = sh(script: """
+                    docker run -v $PWD:/zap/wrk/:rw -t ghcr.io/zaproxy/zaproxy:stable python3 /zap/${zapScript} -t http://54.152.246.198:4000/ > ${filetype}
+                """, returnStatus: true)
 
-                        if (status == 0) {
-                            echo "ZAP scan completed successfully."
-                        } else {
-                            error "ZAP scan failed with status code: ${status}"
-                        }
-                    }
+                env.FILE_TYPE = filetype
+                echo "ZAP scan completed with status code: ${status}"
+
+                if (status != 0) {
+                    echo "ZAP scan found issues or encountered warnings (status code ${status})"
+                    currentBuild.result = 'UNSTABLE'  // Mark build as unstable
                 }
             }
         }
+    }
+}
+
         stage('Push to ECR') {
             steps {
                 script {
@@ -181,40 +181,36 @@ pipeline {
         
     }
     post {
-        always {
-            
-            script {
-                withCredentials([string(credentialsId: 'SlackToken', variable: 'SLACK_TOKEN')]) {
-                    def message = "Jenkins Job - SUCCESS: Build #${env.BUILD_NUMBER} in job '${env.JOB_NAME}' completed successfully."
-                    slackSend(
-                        channel: "${SLACK_CHANNEL}",
-                        color: 'good',
-                        message: message,
-                        tokenCredentialId: 'SlackToken'
-                    )
-                }
+    always {
+        script {
+            withCredentials([string(credentialsId: 'SlackToken', variable: 'SLACK_TOKEN')]) {
+                def message = "Jenkins Job - ${currentBuild.currentResult ?: 'SUCCESS'}: Build #${env.BUILD_NUMBER} in job '${env.JOB_NAME}' completed."
+                slackSend(
+                    channel: "${SLACK_CHANNEL}",
+                    color: (currentBuild.result == 'SUCCESS') ? 'good' : 'warning',
+                    message: message,
+                    tokenCredentialId: 'SlackToken'
+                )
             }
-            
-                    emailext (
-                        subject: "Jenkins Build # ${currentBuild.currentResult ?: 'SUCCESS'}",
-                            body: """
-                            
-                            Commit ID: ${COMMIT_ID}
-                            Build Link: ${env.BUILD_URL}
-                            Triggered By: ${env.BUILD_USER}
-
-                            Reports:
-                            - Trivy Report: ${env.WORKSPACE}/trivy_report.json
-                            - Hadolint Report: ${env.WORKSPACE}/hadolint_report.txt
-                            - OWASP ZAP Report: ${env.WORKSPACE}/${env.FILE_TYPE}
-                        """,
-                        to: "${EMAIL_RECIPIENTS}",
-                        attachmentsPattern: "trivy_report.json, hadolint_report.txt, ${env.FILE_TYPE}"  // Attach the reports
-                    )
-            echo "Cleaning up Docker resources"
-            deleteDir()
         }
-        
-        
-    }  
+
+        emailext (
+            subject: "Jenkins Build #${env.BUILD_NUMBER}: ${currentBuild.result}",
+            body: """
+                Commit ID: ${COMMIT_ID}
+                Build Link: ${env.BUILD_URL}
+                Triggered By: ${env.BUILD_USER}
+
+                Reports:
+                - Trivy Report: ${env.WORKSPACE}/trivy_report.json
+                - Hadolint Report: ${env.WORKSPACE}/hadolint_report.txt
+                - OWASP ZAP Report: ${env.WORKSPACE}/${env.FILE_TYPE}
+            """,
+            to: "${EMAIL_RECIPIENTS}",
+            attachmentsPattern: "trivy_report.json, hadolint_report.txt, ${env.FILE_TYPE}",  // Attach the reports
+            attachLog: true  // Attach the build log as well for better debugging
+        )
+        echo "Cleaning up Docker resources"
+        deleteDir()
+    }
 }
