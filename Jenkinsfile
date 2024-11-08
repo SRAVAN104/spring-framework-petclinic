@@ -129,41 +129,41 @@ pipeline {
     }
 }
 
-stage('OWASP ZAP Scan') {
-    steps {
-        catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') {
-            script {
-                echo "Selected OWASP ZAP scan type: ${params.ZAP_SCAN_TYPE}"
-                def zapScript = ''
-                def filetype = ''
-                if (params.ZAP_SCAN_TYPE == 'Baseline') {
-                    zapScript = 'zap-baseline.py'
-                    filetype = 'zap-baseline.html'
-                } else if (params.ZAP_SCAN_TYPE == 'API') {
-                    zapScript = 'zap-api-scan.py'
-                    filetype = 'zap-api-scan.html'
-                } else if (params.ZAP_SCAN_TYPE == 'FULL') {
-                    zapScript = 'zap-full-scan.py'
-                    filetype = 'zap-full-scan.html'
-                }
+        stage('OWASP ZAP Scan') {
+            steps {
+                catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') {
+                    script {
+                        echo "Selected OWASP ZAP scan type: ${params.ZAP_SCAN_TYPE}"
+                        def zapScript = ''
+                        def filetype = ''
+                        if (params.ZAP_SCAN_TYPE == 'Baseline') {
+                           zapScript = 'zap-baseline.py'
+                           filetype = 'zap-baseline.html'
+                        
+                        } else if (params.ZAP_SCAN_TYPE == 'API') {
+                           zapScript = 'zap-api-scan.py'
+                           filetype = 'zap-api-scan.html'
+                        } else if (params.ZAP_SCAN_TYPE == 'FULL') {
+                           zapScript = 'zap-full-scan.py'
+                           filetype = 'zap-full-scan.html'
+                        }
+                        
+                        def status = sh(script: """
+                            docker run -v $PWD:/zap/wrk/:rw -t ghcr.io/zaproxy/zaproxy:stable python3 /zap/${zapScript} -t http://54.152.246.198:4000/ > ${filetype}
+                        """, returnStatus: true)
 
-                // Run the ZAP scan and handle non-zero exit codes
-                def status = sh(script: """
-                    docker run -v $PWD:/zap/wrk/:rw -t ghcr.io/zaproxy/zaproxy:stable python3 /zap/${zapScript} -t http://54.152.246.198:4000/ > ${filetype}
-                """, returnStatus: true)
+                        env.FILE_TYPE = filetype
+                        echo "${FILE_TYPE}"
 
-                env.FILE_TYPE = filetype
-                echo "ZAP scan completed with status code: ${status}"
-
-                if (status != 0) {
-                    echo "ZAP scan found issues or encountered warnings (status code ${status})"
-                    currentBuild.result = 'UNSTABLE'  // Mark build as unstable
+                        if (status == 0) {
+                            echo "ZAP scan completed successfully."
+                        } else {
+                            error "ZAP scan failed with status code: ${status}"
+                        }
+                    }
                 }
             }
         }
-    }
-}
-
         stage('Push to ECR') {
             steps {
                 script {
