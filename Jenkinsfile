@@ -198,7 +198,6 @@ pipeline {
                     emailext (
                         subject: "Jenkins Build # ${currentBuild.currentResult ?: 'SUCCESS'}",
                             body: """
-                            
                             Commit ID: ${COMMIT_ID}
                             Build Link: ${env.BUILD_URL}
                             Triggered By: ${env.BUILD_USER}
