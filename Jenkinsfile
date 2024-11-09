@@ -149,7 +149,7 @@ pipeline {
                         }
                         
                         def status = sh(script: """
-                            docker run -v $PWD:/zap/wrk/:rw -t ghcr.io/zaproxy/zaproxy:stable python3 /zap/${zapScript} -t http://54.152.246.198:4000/ > ${filetype}
+                            docker run -v $PWD:/zap/wrk/:rw -t ghcr.io/zaproxy/zaproxy:stable python3 /zap/${zapScript} -t http://34.230.88.36:9000/ > ${filetype}
                         """, returnStatus: true)
 
                         env.FILE_TYPE = filetype
